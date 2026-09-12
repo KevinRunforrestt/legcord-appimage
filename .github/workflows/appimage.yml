@@ -4,17 +4,9 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+# Manual trigger ONLY. No push, no schedule. The user controls when to build.
 on:
-  # Rebuild every 7 days to pick up new Legcord releases
-  schedule:
-    - cron: "0 7 1/7 * *"
   workflow_dispatch: {}
-  push:
-    branches: [ main ]
-    paths:
-      - 'build.sh'
-      - '.github/workflows/appimage.yml'
-      - 'LATEST_VERSION'
 
 jobs:
   build:

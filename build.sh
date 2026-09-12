@@ -53,13 +53,14 @@ LEGCORD_FLAGS='
 # STEP 1: Install dependencies (Arch Linux container)
 # ---------------------------------------------------------------------------
 echo "=== STEP 1: Install dependencies ==="
+# NOTE: 'ar' is provided by 'binutils' which is part of 'base-devel' (already
+# installed by anylinux-setup-action). Do NOT add it to the list — pacman will
+# abort with "target not found: ar" because there is no standalone 'ar' pkg.
 pacman -Syu --noconfirm \
-    base-devel \
     wget \
     strace \
     jq \
     brotli \
-    ar \
     libappindicator-gtk3 \
     libatomic \
     libva-intel-driver

@@ -45,10 +45,18 @@ via `anylinux-setup-action`).
 
 ## CI
 
-The workflow at `.github/workflows/appimage.yml` runs every 7 days and on push to
-`main`. It builds the AppImage inside `ghcr.io/pkgforge-dev/archlinux:latest`, then
-publishes a GitHub Release with the AppImage, the `.zsync` (for delta updates), and
-the `.sha256` checksum.
+The workflow at `.github/workflows/appimage.yml` is **manual only**
+(`workflow_dispatch`). It is not triggered by pushes or schedules — you
+decide when to rebuild by clicking "Run workflow" in the Actions tab on GitHub.
+
+To enable periodic rebuilds, add this under `on:` in the workflow:
+
+```yaml
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 7 1/7 * *"
+```
 
 ## Verification
 

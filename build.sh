@@ -10,16 +10,33 @@
 #   legcord.real    -> the real Electron binary (210 MB)
 #   *.so*, *.pak, *.dat, locales/, resources/  -> Chromium / Vencord assets
 #
-# Injected Chromium flags (verified valid for Electron >= 28):
-#   Wayland/X11 dual:        --ozone-platform-hint=auto
-#   Hardware acceleration:   --use-gl=angle --use-angle=opengl --ignore-gpu-blocklist
-#   Sandbox/namespace fix:  --disable-gpu-sandbox
-#   Window visibility fix:   --disable-features=CalculateNativeWinOcclusion
-#   RAM optimization:        --process-per-site --enable-low-res-tiling
+# Chromium flags injected by the wrapper (taken DIRECTLY from Legcord's
+# internal "memory" preset found in the app.asar source code):
 #
-# If any flag causes instability, comment it out in the LEGCORD_FLAGS variable
-# below and rebuild. Do NOT remove the wrapper entirely or the original
-# .desktop file actions (mute/deafen/leave/opensettings) will break.
+#     const memory: Preset = {
+#         switches: [
+#             ["enable-low-end-device-mode"],
+#             ["enable-low-res-tiling"],
+#             ["process-per-site"],
+#             ["renderer-process-limit", "2"],
+#             ["force_low_power_gpu"],
+#             ["disk-cache-size", "67108864"], // 64 MB
+#             ["skia-resource-cache-limit-mb", "64"],
+#         ],
+#         enableFeatures: ["CalculateNativeWinOcclusion", "TurnOffStreamingMediaCachingOnBattery"],
+#         disableFeatures: [],
+#     };
+#
+# We also keep `--ozone-platform-hint=auto` (which Legcord's own package.json
+# uses in its start script) for Wayland/X11 auto-selection.
+#
+# DO NOT add --use-gl=angle, --use-angle=opengl, --ignore-gpu-blocklist, or
+# --disable-gpu-sandbox here. Those are only used in the linuxVaapi / balanced
+# presets and INCREASE RAM usage by forcing high-power GPU paths. The memory
+# preset intentionally leaves them out.
+#
+# If a flag causes instability, comment it out and rebuild. The flags below
+# are the official Legcord-blessed "low RAM" configuration.
 # =============================================================================
 
 set -eu
@@ -36,17 +53,18 @@ DEB_ARCH_PATTERN="amd64"
 LEGCORD_REPO="Legcord/Legcord"
 LEGCORD_API="https://api.github.com/repos/${LEGCORD_REPO}/releases/latest"
 
-# Chromium flags injected by the wrapper script (see LEGCORD_FLAGS below).
-# Remove individual flags here if they cause instability.
+# Chromium flags from Legcord's internal "memory" preset, plus
+# --ozone-platform-hint=auto (which Legcord's own start script uses).
 LEGCORD_FLAGS='
     --ozone-platform-hint=auto
-    --use-gl=angle
-    --use-angle=opengl
-    --ignore-gpu-blocklist
-    --disable-gpu-sandbox
-    --disable-features=CalculateNativeWinOcclusion
-    --process-per-site
+    --enable-low-end-device-mode
     --enable-low-res-tiling
+    --process-per-site
+    --renderer-process-limit=2
+    --force_low_power_gpu
+    --disk-cache-size=67108864
+    --skia-resource-cache-limit-mb=64
+    --enable-features=CalculateNativeWinOcclusion,TurnOffStreamingMediaCachingOnBattery
 '
 
 # ---------------------------------------------------------------------------

@@ -216,15 +216,41 @@ if [ -z "$ICON_SRC" ]; then
     exit 1
 fi
 
-# Patch the system .desktop file to point inside the AppDir.
-# - Main Exec= line points to /opt/Legcord/legcord -> replace with just 'legcord'
-# - Action Exec= lines use 'AppRun' as the binary name -> replace with 'legcord'
-#   preserving the action-specific args (--mute, --deafen, --leave, --opensettings)
-sed \
-    -e 's|^Exec=/opt/Legcord/legcord|Exec=legcord|' \
-    -e 's|^Exec=AppRun |Exec=legcord |g' \
-    -e 's|^Icon=.*|Icon=legcord|' \
-    /usr/share/applications/legcord.desktop > ./AppDir/legcord.desktop
+# Write the .desktop file from scratch, using the SAME short Comment as the
+# upstream .deb. Includes the X-AppImage-* metadata fields (same as
+# fluxer-canary-appimage does) so AppImage launchers can read the version.
+cat > ./AppDir/legcord.desktop <<EOF
+[Desktop Entry]
+Name=Legcord
+Exec=legcord %U
+Terminal=false
+Type=Application
+Icon=legcord
+StartupWMClass=legcord
+Actions=mute;deafen;leave;opensettings
+Comment=Legcord is a custom client designed to enhance your Discord experience while keeping everything lightweight.
+MimeType=x-scheme-handler/discord;
+Categories=Network;
+X-AppImage-Name=Legcord
+X-AppImage-Version=${VERSION}
+X-AppImage-Arch=${ARCH}
+
+[Desktop Action mute]
+Name=Toggle Mute
+Exec=legcord --mute %U
+
+[Desktop Action deafen]
+Name=Toggle Deafen
+Exec=legcord --deafen %U
+
+[Desktop Action leave]
+Name=Leave Call
+Exec=legcord --leave %U
+
+[Desktop Action opensettings]
+Name=Open Settings
+Exec=legcord --opensettings %U
+EOF
 
 # Copy icon to AppDir root (quick-sharun looks for it there) and .DirIcon
 cp "$ICON_SRC" ./AppDir/legcord.png
@@ -233,6 +259,7 @@ cp "$ICON_SRC" ./AppDir/.DirIcon
 echo "Desktop file: $(ls -la ./AppDir/legcord.desktop | awk '{print $5, $9}')"
 echo "Icon:         $ICON_SRC"
 echo "AppDir Icon:  $(ls -la ./AppDir/legcord.png | awk '{print $5, $9}')"
+echo "Version:      $VERSION (X-AppImage-Version=${VERSION})"
 
 # ---------------------------------------------------------------------------
 # STEP 7: Package with quick-sharun

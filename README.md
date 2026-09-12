@@ -1,75 +1,39 @@
-# Legcord AppImage
+<div align="center">
 
-Portable AppImage of [Legcord](https://github.com/Legcord/Legcord) built using the
-[Anylinux-AppImages](https://github.com/pkgforge-dev/Anylinux-AppImages) methodology.
+# Legcord-AppImage 🐧
 
-## What is this?
+[![GitHub Downloads](https://img.shields.io/github/downloads/KevinRunforrestt/legcord-appimage/total?logo=github&label=GitHub%20Downloads)](https://github.com/KevinRunforrestt/legcord-appimage/releases/latest)
+[![CI Build Status](https://github.com/KevinRunforrestt/legcord-appimage/actions/workflows/appimage.yml/badge.svg)](https://github.com/KevinRunforrestt/legcord-appimage/actions/workflows/appimage.yml)
+[![Latest Release](https://img.shields.io/github/v/release/KevinRunforrestt/legcord-appimage)](https://github.com/KevinRunforrestt/legcord-appimage/releases/latest)
 
-A single-file AppImage of Legcord (custom Discord client based on Electron) that runs
-on **any Linux distribution**, including:
+<p align="center">
+  <img
+    src="https://raw.githubusercontent.com/Legcord/Legcord/main/build/icon.png"
+    alt="Legcord icon"
+    width="128"
+  />
+</p>
 
-- glibc distros (Ubuntu 14.04+, Debian, Arch, Fedora, openSUSE)
-- musl libc distros (Alpine, Void musl)
-- NixOS (no wrapper needed)
+| Latest Release | Upstream Repository |
+| :---: | :---: |
+| [Download](https://github.com/KevinRunforrestt/legcord-appimage/releases/latest) | [Legcord](https://github.com/Legcord/Legcord) |
 
-The AppImage bundles **everything**: libc, the dynamic linker (`ld-linux-x86-64.so.2`),
-mesa/Vulkan/OpenGL stacks, audio (PulseAudio/PipeWire), X11 and Wayland libraries,
-plus the Vencord and koffi native modules shipped inside Legcord's `app.asar.unpacked`.
+</div>
 
-## Why a wrapper script?
+---
 
-Legcord ships as an Electron binary. Electron on Linux needs several Chromium
-command-line flags to behave correctly inside an AppImage:
+An unofficial AppImage build of **Legcord** for Linux.
 
-| Flag | Why |
-| --- | --- |
-| `--ozone-platform-hint=auto` | Auto-selects Wayland or X11 at startup |
-| `--use-gl=angle --use-angle=opengl` | Forces OpenGL native rendering (works with bundled mesa) |
-| `--ignore-gpu-blocklist` | Prevents Chromium from disabling the GPU |
-| `--disable-gpu-sandbox` | Avoids conflicts with uruntime namespaces |
-| `--disable-features=CalculateNativeWinOcclusion` | Prevents the window from being marked as hidden |
-| `--process-per-site` | Reduces RAM by sharing renderer processes per site |
-| `--enable-low-res-tiling` | Reduces GPU compositor memory |
+This AppImage is built using [sharun](https://github.com/VHSgunzo/sharun) and its wrapper, [quick-sharun](https://github.com/pkgforge-dev/Anylinux-AppImages/blob/main/useful-tools/quick-sharun.sh). These tools make it easy to turn binaries into reliable, portable packages without using containers or similar workarounds.
 
-These flags are injected by the wrapper script that lives at `AppDir/bin/legcord`,
-which calls the real Electron binary at `AppDir/bin/legcord.real`.
+The AppImage bundles its dependencies and should work on most Linux distributions, including older and musl-based distributions.
 
-## Local build
+It does not require FUSE to run, thanks to [uruntime](https://github.com/VHSgunzo/uruntime).
 
-```bash
-docker run --rm -it -v "$PWD:/work" -w /work ghcr.io/pkgforge-dev/archlinux:latest ./build.sh
-```
+The CI runs automatically every 7 days and detects when a new Legcord version is released by comparing the upstream GitHub release tag with the `LATEST_VERSION` file in this repo. When a new version is detected, it builds the AppImage and publishes a new GitHub Release. Manual triggers from the Actions tab are also supported and always build, even if the version hasn't changed.
 
-Or run directly on Arch Linux (requires `pacman`, `sudo`, and `quick-sharun` installed
-via `anylinux-setup-action`).
+For more information, visit [Anylinux-AppImages](https://pkgforge-dev.github.io/Anylinux-AppImages/).
 
-## CI
+## Credits
 
-The workflow at `.github/workflows/appimage.yml` is **manual only**
-(`workflow_dispatch`). It is not triggered by pushes or schedules — you
-decide when to rebuild by clicking "Run workflow" in the Actions tab on GitHub.
-
-To enable periodic rebuilds, add this under `on:` in the workflow:
-
-```yaml
-on:
-  workflow_dispatch: {}
-  schedule:
-    - cron: "0 7 1/7 * *"
-```
-
-## Verification
-
-After building, the script extracts the AppImage and verifies:
-
-- `ld-linux-x86-64.so.2` is bundled
-- `libc.so*` is bundled
-- The wrapper script is in place at `bin/legcord`
-- The real Electron binary is at `bin/legcord.real`
-
-## Tuning flags
-
-If a flag causes instability (e.g. blank window, GPU process crash), edit the
-`LEGCORD_FLAGS` variable at the top of `build.sh`, comment out the problematic
-flag, and rebuild. Do **not** remove the wrapper itself — that would break the
-`.desktop` file action shortcuts (`mute`, `deafen`, `leave`, `opensettings`).
+Thanks to [Samueru-sama](https://github.com/Samueru-sama) and [fiftydinar](https://github.com/fiftydinar) for making AppImage builds quicker and easier with the [Anylinux-AppImages](https://github.com/pkgforge-dev/Anylinux-AppImages) tools.

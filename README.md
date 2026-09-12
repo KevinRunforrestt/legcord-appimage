@@ -30,7 +30,7 @@ The AppImage bundles its dependencies and should work on most Linux distribution
 
 It does not require FUSE to run, thanks to [uruntime](https://github.com/VHSgunzo/uruntime).
 
-The CI runs automatically every 7 days and detects when a new Legcord version is released by comparing the upstream GitHub release tag with the `LATEST_VERSION` file in this repo. When a new version is detected, it builds the AppImage and publishes a new GitHub Release. Manual triggers from the Actions tab are also supported and always build, even if the version hasn't changed.
+The CI runs automatically every 7 days and detects when a new Legcord version is released by querying the upstream GitHub API and comparing it against the existing Releases in this repo. When a new version is detected (i.e. no Release tagged `vX.Y.Z` exists yet), it builds the AppImage and publishes a new GitHub Release with that tag. Manual triggers from the Actions tab are also supported and always build, even if the version was already released.
 
 For more information, visit [Anylinux-AppImages](https://pkgforge-dev.github.io/Anylinux-AppImages/).
 

@@ -27,31 +27,14 @@ set -eu
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-ARCH=$(uname -m)
+# This script is x86_64 only. If you need aarch64/armv7l, fork and adjust.
+ARCH="x86_64"
+LEGCORD_ARCH_DIR="linux-x64"
+ASSET_PATTERN="linux-x64.tar.gz"
+DEB_ARCH_PATTERN="amd64"
 
-# Repository to query for the latest release (without API token, anonymous)
 LEGCORD_REPO="Legcord/Legcord"
 LEGCORD_API="https://api.github.com/repos/${LEGCORD_REPO}/releases/latest"
-
-# Select the right asset name per architecture
-case "$ARCH" in
-    x86_64)
-        ASSET_PATTERN="linux-x64.tar.gz"
-        LEGCORD_ARCH_DIR="linux-x64"
-        ;;
-    aarch64)
-        ASSET_PATTERN="linux-arm64.tar.gz"
-        LEGCORD_ARCH_DIR="linux-arm64"
-        ;;
-    armv7l|armhf)
-        ASSET_PATTERN="linux-armv7l.tar.gz"
-        LEGCORD_ARCH_DIR="linux-armv7l"
-        ;;
-    *)
-        echo "ERROR: Unsupported architecture: $ARCH"
-        exit 1
-        ;;
-esac
 
 # Chromium flags injected by the wrapper script (see LEGCORD_FLAGS below).
 # Remove individual flags here if they cause instability.
@@ -76,12 +59,10 @@ pacman -Syu --noconfirm \
     strace \
     jq \
     brotli \
+    ar \
     libappindicator-gtk3 \
-    libatomic
-
-if [ "$ARCH" = 'x86_64' ]; then
-    pacman -Syu --noconfirm libva-intel-driver
-fi
+    libatomic \
+    libva-intel-driver
 
 # Debloated packages: recortan libLLVM, mesa, vulkan, Qt, GTK, libicudata
 # hasta ~50 MiB en AppImages que usan GPU (frente a >200 MiB sin recortar)
@@ -89,34 +70,92 @@ get-debloated-pkgs --add-mesa --prefer-nano
 get-debloated-pkgs --add-common --prefer-nano intel-media-driver-mini
 
 # ---------------------------------------------------------------------------
-# STEP 2: Download Legcord tarball from GitHub releases
+# STEP 2: Download Legcord release metadata (tarball + .deb URLs)
 # ---------------------------------------------------------------------------
 echo ""
-echo "=== STEP 2: Download Legcord ($ARCH) ==="
+echo "=== STEP 2: Download Legcord release metadata ==="
 
-echo "Querying: $LEGCORD_API"
 RELEASE_JSON=$(wget -q --header="User-Agent: legcord-appimage" "$LEGCORD_API" -O -)
+VERSION=$(echo "$RELEASE_JSON" | jq -r '.tag_name | ltrimstr("v")')
+
 TARBALL_URL=$(echo "$RELEASE_JSON" \
     | jq -r --arg pat "$ASSET_PATTERN" \
         '.assets[] | select(.name | endswith($pat)) | .browser_download_url' \
     | head -1)
 
+DEB_URL=$(echo "$RELEASE_JSON" \
+    | jq -r --arg pat "$DEB_ARCH_PATTERN" \
+        '.assets[] | select(.name | endswith(".deb")) | select(.name | contains($pat)) | .browser_download_url' \
+    | head -1)
+
 if [ -z "$TARBALL_URL" ] || [ "$TARBALL_URL" = "null" ]; then
-    echo "ERROR: Could not find asset matching '*$ASSET_PATTERN' in $LEGCORD_REPO"
+    echo "ERROR: Could not find tarball asset '*$ASSET_PATTERN'"
+    echo "$RELEASE_JSON" | jq '.assets[].name'
+    exit 1
+fi
+if [ -z "$DEB_URL" ] || [ "$DEB_URL" = "null" ]; then
+    echo "ERROR: Could not find .deb asset containing '$DEB_ARCH_PATTERN'"
     echo "$RELEASE_JSON" | jq '.assets[].name'
     exit 1
 fi
 
-VERSION=$(echo "$RELEASE_JSON" | jq -r '.tag_name | ltrimstr("v")')
 echo "Latest Legcord version: $VERSION"
 echo "Tarball URL: $TARBALL_URL"
+echo "Deb URL:     $DEB_URL"
+
+# ---------------------------------------------------------------------------
+# STEP 3: Download .deb and extract icons + desktop file (icons are NOT in
+# the tarball, only in the .deb package). We extract the .deb first so the
+# icon search in STEP 5 finds them at /usr/share/icons/hicolor/...
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== STEP 3: Download .deb and extract icons + desktop file ==="
+
+TMP_DEB=/tmp/legcord.deb
+echo "Downloading .deb..."
+wget -q "$DEB_URL" -O "$TMP_DEB"
+ls -lh "$TMP_DEB"
+
+# Extract data.tar.xz from the .deb (ar x writes to current directory)
+WORK_DIR=$(mktemp -d)
+( cd "$WORK_DIR" && ar x "$TMP_DEB" data.tar.xz )
+
+if [ ! -f "$WORK_DIR/data.tar.xz" ]; then
+    echo "ERROR: Failed to extract data.tar.xz from .deb"
+    exit 1
+fi
+
+# Extract icons + desktop file to the system root (CI runs as root)
+echo "Extracting icons + desktop file to /usr/share ..."
+tar -xJf "$WORK_DIR/data.tar.xz" -C / \
+    ./usr/share/applications/legcord.desktop \
+    ./usr/share/icons/hicolor 2>/dev/null || true
+
+rm -rf "$WORK_DIR" "$TMP_DEB"
+
+# Verify extraction succeeded
+if [ ! -f /usr/share/applications/legcord.desktop ]; then
+    echo "ERROR: legcord.desktop not extracted to /usr/share/applications/"
+    exit 1
+fi
+ICON_COUNT=$(find /usr/share/icons/hicolor -name "legcord.png" 2>/dev/null | wc -l)
+if [ "$ICON_COUNT" -eq 0 ]; then
+    echo "ERROR: No legcord.png icons extracted"
+    exit 1
+fi
+echo "Extracted $ICON_COUNT icons + desktop file"
+
+# ---------------------------------------------------------------------------
+# STEP 4: Download and extract the Legcord tarball (binaries + Electron)
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== STEP 4: Download Legcord tarball ==="
 
 mkdir -p ./AppDir/bin
 echo "Downloading tarball..."
 wget -q "$TARBALL_URL" -O - \
     | tar xzf - --strip-components=1 -C ./AppDir/bin
 
-# Sanity-check: the binary must be there
 if [ ! -x "./AppDir/bin/legcord" ]; then
     echo "ERROR: ./AppDir/bin/legcord not found after extraction"
     find ./AppDir/bin -maxdepth 1 -type f | head -20
@@ -130,10 +169,10 @@ chmod +x ./AppDir/bin/*.so* 2>/dev/null || true
 echo "Files in AppDir/bin/: $(ls ./AppDir/bin/ | wc -l)"
 
 # ---------------------------------------------------------------------------
-# STEP 3: Create wrapper script that injects Chromium flags
+# STEP 5: Create wrapper script that injects Chromium flags
 # ---------------------------------------------------------------------------
 echo ""
-echo "=== STEP 3: Create wrapper script with Chromium flags ==="
+echo "=== STEP 5: Create wrapper script with Chromium flags ==="
 
 # Rename the real binary
 mv ./AppDir/bin/legcord ./AppDir/bin/legcord.real
@@ -156,14 +195,14 @@ echo "Wrapper created with flags:"
 echo "$WRAPPER_FLAGS" | tr ' ' '\n' | grep -v '^$' | sed 's/^/  /'
 
 # ---------------------------------------------------------------------------
-# STEP 4: Create desktop file and icon
+# STEP 6: Configure desktop file and icon for the AppDir
 # ---------------------------------------------------------------------------
 echo ""
-echo "=== STEP 4: Create desktop file and icon ==="
+echo "=== STEP 6: Configure desktop file and icon ==="
 
-# Use the highest-resolution icon we can find; prefer 512x512, fall back to 256
+# Pick the highest-resolution icon
 ICON_SRC=""
-for size in 512x512 256x256 128x128 48x48 64x64; do
+for size in 512x512 256x256 128x128 64x64 48x48 32x32; do
     candidate="/usr/share/icons/hicolor/${size}/apps/legcord.png"
     if [ -f "$candidate" ]; then
         ICON_SRC="$candidate"
@@ -171,104 +210,34 @@ for size in 512x512 256x256 128x128 48x48 64x64; do
     fi
 done
 
-# If the .deb hasn't installed icons (e.g., we used the tarball directly),
-# pull a fallback icon from the GitHub release
 if [ -z "$ICON_SRC" ]; then
-    FALLBACK_ICON_URL=$(echo "$RELEASE_JSON" \
-        | jq -r '.assets[] | select(.name | endswith(".png") or endswith(".svg")) | .browser_download_url' \
-        | head -1)
-    if [ -n "$FALLBACK_ICON_URL" ] && [ "$FALLBACK_ICON_URL" != "null" ]; then
-        mkdir -p /usr/share/icons/hicolor/512x512/apps
-        wget -q "$FALLBACK_ICON_URL" -O /usr/share/icons/hicolor/512x512/apps/legcord.png
-        ICON_SRC="/usr/share/icons/hicolor/512x512/apps/legcord.png"
-    fi
-fi
-
-if [ -z "$ICON_SRC" ]; then
-    echo "ERROR: No icon available. Install the Legcord .deb first, or include an icon in the repo."
+    echo "ERROR: No legcord.png icon found after .deb extraction"
     exit 1
 fi
 
-# Download the .deb's icon set if we don't have icons (needed for proper icon
-# discovery by sharun and for the .desktop file)
-if [ ! -f /usr/share/applications/legcord.desktop ]; then
-    echo "Fetching Legcord .deb to extract desktop file and icons..."
-    DEB_URL=$(echo "$RELEASE_JSON" \
-        | jq -r --arg arch "$ARCH" \
-            '.assets[] | select(.name | endswith(".deb")) | select(.name | contains(if $arch=="x86_64" then "amd64" elif $arch=="aarch64" then "arm64" else "armv7l" end)) | .browser_download_url' \
-        | head -1)
-    if [ -n "$DEB_URL" ] && [ "$DEB_URL" != "null" ]; then
-        TMP_DEB=/tmp/legcord.deb
-        wget -q "$DEB_URL" -O "$TMP_DEB"
-        cd /tmp && ar x "$TMP_DEB" data.tar.xz 2>/dev/null || true
-        if [ -f /tmp/data.tar.xz ]; then
-            sudo tar -xJf /tmp/data.tar.xz -C / 2>/dev/null \
-                ./usr/share/applications/legcord.desktop \
-                ./usr/share/icons/hicolor 2>/dev/null || \
-            tar -xJf /tmp/data.tar.xz -C / -- ./usr/share/applications ./usr/share/icons 2>/dev/null || true
-            rm -f /tmp/data.tar.xz
-        fi
-        rm -f "$TMP_DEB"
-        cd - >/dev/null
-    fi
-fi
-
-# Use the system-installed desktop file if available, else write one
-if [ -f /usr/share/applications/legcord.desktop ]; then
-    DESKTOP_SRC=/usr/share/applications/legcord.desktop
-    # Patch Exec= and Icon= to point inside the AppDir
-    sed \
-        -e 's|^Exec=.*|Exec=legcord %U|' \
-        -e 's|^Icon=.*|Icon=legcord|' \
-        -e 's|^Exec=AppRun |Exec=legcord |g' \
-        "$DESKTOP_SRC" > ./AppDir/legcord.desktop
-else
-    cat > ./AppDir/legcord.desktop <<EOF
-[Desktop Entry]
-Name=Legcord
-Exec=legcord %U
-Terminal=false
-Type=Application
-Icon=legcord
-StartupWMClass=legcord
-Actions=mute;deafen;leave;opensettings
-Comment=Legcord is a custom client designed to enhance your Discord experience while keeping everything lightweight.
-MimeType=x-scheme-handler/discord;
-Categories=Network;
-X-AppImage-Name=Legcord
-X-AppImage-Version=${VERSION}
-X-AppImage-Arch=${ARCH}
-
-[Desktop Action mute]
-Name=Toggle Mute
-Exec=legcord --mute %U
-
-[Desktop Action deafen]
-Name=Toggle Deafen
-Exec=legcord --deafen %U
-
-[Desktop Action leave]
-Name=Leave Call
-Exec=legcord --leave %U
-
-[Desktop Action opensettings]
-Name=Open Settings
-Exec=legcord --opensettings %U
-EOF
-fi
+# Patch the system .desktop file to point inside the AppDir.
+# - Main Exec= line points to /opt/Legcord/legcord -> replace with just 'legcord'
+# - Action Exec= lines use 'AppRun' as the binary name -> replace with 'legcord'
+#   preserving the action-specific args (--mute, --deafen, --leave, --opensettings)
+sed \
+    -e 's|^Exec=/opt/Legcord/legcord|Exec=legcord|' \
+    -e 's|^Exec=AppRun |Exec=legcord |g' \
+    -e 's|^Icon=.*|Icon=legcord|' \
+    /usr/share/applications/legcord.desktop > ./AppDir/legcord.desktop
 
 # Copy icon to AppDir root (quick-sharun looks for it there) and .DirIcon
-cp "$ICON_SRC" ./AppDir/legcord.png 2>/dev/null || true
-cp "$ICON_SRC" ./AppDir/.DirIcon 2>/dev/null || true
+cp "$ICON_SRC" ./AppDir/legcord.png
+cp "$ICON_SRC" ./AppDir/.DirIcon
 
 echo "Desktop file: $(ls -la ./AppDir/legcord.desktop | awk '{print $5, $9}')"
-echo "Icon: $ICON_SRC"
+echo "Icon:         $ICON_SRC"
+echo "AppDir Icon:  $(ls -la ./AppDir/legcord.png | awk '{print $5, $9}')"
 
 # ---------------------------------------------------------------------------
-# STEP 5: Package with quick-sharun
+# STEP 7: Package with quick-sharun
 # ---------------------------------------------------------------------------
 echo ""
-echo "=== STEP 5: Package with quick-sharun ==="
+echo "=== STEP 7: Package with quick-sharun ==="
 
 export ARCH VERSION
 export OUTPATH=./dist
@@ -296,10 +265,10 @@ quick-sharun \
 quick-sharun --make-appimage
 
 # ---------------------------------------------------------------------------
-# STEP 6: Verify the build (only smoke-test the binary, do not run the GUI)
+# STEP 8: Verify the build (smoke-test the binary, do not run the GUI)
 # ---------------------------------------------------------------------------
 echo ""
-echo "=== STEP 6: Verify bundled libc + ld-linux ==="
+echo "=== STEP 8: Verify bundled libc + ld-linux ==="
 
 APPIMAGE_PATH=$(ls ./dist/*${ARCH}.AppImage 2>/dev/null | head -1)
 if [ -z "$APPIMAGE_PATH" ]; then

@@ -1,0 +1,105 @@
+name: Build Legcord AppImage
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  # Rebuild every 7 days to pick up new Legcord releases
+  schedule:
+    - cron: "0 7 1/7 * *"
+  workflow_dispatch: {}
+  push:
+    branches: [ main ]
+    paths:
+      - 'build.sh'
+      - '.github/workflows/appimage.yml'
+      - 'LATEST_VERSION'
+
+jobs:
+  build:
+    name: "Build AppImage (${{ matrix.arch }})"
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runs-on: ubuntu-latest
+            name: Build AppImage
+            arch: x86_64
+          # Uncomment to also build aarch64 (needs arm runner)
+          # - runs-on: ubuntu-24.04-arm
+          #   name: Build AppImage
+          #   arch: aarch64
+    container: ghcr.io/pkgforge-dev/archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare Arch Linux container
+        uses: pkgforge-dev/anylinux-setup-action@v2
+
+      - name: Build AppImage
+        run: |
+          chmod +x ./build.sh
+          ./build.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppImage-${{ matrix.arch }}
+          path: |
+            dist/*.AppImage
+            dist/*.AppImage.zsync
+            dist/*.AppImage.sha256
+            dist/appinfo
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Release to GitHub
+    if: ${{ github.ref_name == 'main' }}
+    needs: [build]
+    permissions: write-all
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: AppImage-*
+          merge-multiple: true
+
+      - name: Release AppImage
+        uses: pkgforge-dev/make-stable-appimage-release@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          release_name: "Legcord"
+          release_body: |
+            # Legcord AppImage
+
+            Legcord packaged using the
+            [Anylinux-AppImages](https://github.com/pkgforge-dev/Anylinux-AppImages) methodology.
+
+            ## Features
+            - Runs on any Linux distro (glibc, musl, NixOS) without wrappers
+            - No FUSE required (uruntime 0-requirements fallback to namespaces / extract-and-run)
+            - All dependencies bundled (libc, ld-linux, mesa, Vulkan, audio, X11, Wayland)
+            - Wayland + X11 dual support via `--ozone-platform-hint=auto`
+            - Hardware acceleration enabled (`--use-gl=angle --use-angle=opengl --ignore-gpu-blocklist`)
+            - GPU sandbox disabled to avoid conflicts with uruntime namespaces
+            - RAM optimization flags (`--process-per-site --enable-low-res-tiling`)
+
+            ## Usage
+            ```bash
+            chmod +x Legcord-*-x86_64.AppImage
+            ./Legcord-*-x86_64.AppImage
+            ```
+
+            ## Auto-update
+            Includes `.zsync` for delta updates via AM, soar, or AppImageUpdate.
+
+            ## Sources
+            - Upstream: https://github.com/Legcord/Legcord
+            - Build script: https://github.com/${{ github.repository }}
+          release_files: |
+            *.AppImage
+            *.AppImage.zsync
+            *.AppImage.sha256

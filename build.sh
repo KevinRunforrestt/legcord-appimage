@@ -268,33 +268,46 @@ quick-sharun --make-appimage
 # ---------------------------------------------------------------------------
 # STEP 8: Verify the build (smoke-test the binary, do not run the GUI)
 # ---------------------------------------------------------------------------
+# IMPORTANT: This step MUST be non-fatal. The AppImage is already built in
+# STEP 7; this is just a sanity check. If verification fails (e.g., FUSE
+# unavailable, or extract-and-run also fails), we must NOT exit with non-zero
+# because that would skip the artifact upload in the next CI step.
 echo ""
 echo "=== STEP 8: Verify bundled libc + ld-linux ==="
 
 APPIMAGE_PATH=$(ls ./dist/*${ARCH}.AppImage 2>/dev/null | head -1)
 if [ -z "$APPIMAGE_PATH" ]; then
-    echo "ERROR: AppImage not found in ./dist/"
+    echo "ERROR: AppImage not found in ./dist/ -- this is a real build failure"
+    ls -la ./dist/ 2>/dev/null || true
     exit 1
 fi
 
-echo "AppImage: $APPIMAGE_PATH ($(ls -lh "$APPIMAGE_PATH" | awk '{print $5}'))"
+# Convert to ABSOLUTE path before any 'cd' to /tmp (relative paths break there)
+APPIMAGE_ABS=$(readlink -f "$APPIMAGE_PATH")
+echo "AppImage: $APPIMAGE_ABS ($(ls -lh "$APPIMAGE_ABS" | awk '{print $5}'))"
 
-# Extract to a temp dir to verify the dynamic linker and libc are bundled
+# Make sure the AppImage is executable (uruntime needs +x)
+chmod +x "$APPIMAGE_ABS" 2>/dev/null || true
+
+# Extract to a temp dir to verify the dynamic linker and libc are bundled.
+# Everything here is wrapped in 'set +e' so a failure does NOT exit the build.
+set +e
 rm -rf /tmp/squashfs-root
-( cd /tmp && "$APPIMAGE_PATH" --appimage-extract >/dev/null 2>&1 ) || \
-    ( cd /tmp && chmod +x "$APPIMAGE_PATH" && ./"$(basename "$APPIMAGE_PATH")" --appimage-extract >/dev/null 2>&1 )
+( cd /tmp && "$APPIMAGE_ABS" --appimage-extract >/dev/null 2>&1 )
 
 if [ -d /tmp/squashfs-root ]; then
     echo "Bundled dynamic linker:"
     find /tmp/squashfs-root -maxdepth 3 \( -name 'ld-linux*.so*' -o -name 'ld-musl*.so*' \) -exec ls -la {} \; 2>/dev/null | head -5
     echo "Bundled libc:"
-    find /tmp/squashfs-root -maxdepth 4 -name 'libc.so*' -o -name 'libc.musl*' 2>/dev/null | head -5
+    find /tmp/squashfs-root -maxdepth 4 \( -name 'libc.so*' -o -name 'libc.musl*' \) 2>/dev/null | head -5
     echo "Bundled wrapper:"
     ls -la /tmp/squashfs-root/bin/legcord 2>/dev/null || ls -la /tmp/squashfs-root/shared/bin/legcord 2>/dev/null || true
     rm -rf /tmp/squashfs-root
 else
-    echo "WARN: Could not extract AppImage for verification (FUSE may be unavailable in CI)"
+    echo "WARN: Could not extract AppImage for verification (FUSE may be unavailable in CI)."
+    echo "      The AppImage was still built successfully -- this is just a verification skip."
 fi
+set -e
 
 echo ""
 echo "=== Build complete ==="
